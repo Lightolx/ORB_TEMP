@@ -86,6 +86,15 @@ Eigen::Matrix4d Track::Run(const LINE_PNP::InputFrame &frame)
     // Step1.5: 建立局部3D地图,相机当前所在的road及该road的successor(或predecessor),即当前相机可能看到的所有3D车道线
     ConstructLocalMap();
 
+//    // Step1.8: 计算从左到右车道线之间的距离
+//    std::vector<double> dists = ComputeLaneDists();
+//    cout << "dist is\n";
+//    for (double dist : dists)
+//    {
+//        cout << dist << " ";
+//    }
+//    cout << endl;
+
     // Step2: 在当前帧能看到的每一条3D车道线上各选出两点作为代表,用于接下来重投影回2D图像
     if (!ComputeROIlaneSeg()) {
         std::cerr << "cannot compute a roi lane" << endl;
@@ -94,14 +103,25 @@ Eigen::Matrix4d Track::Run(const LINE_PNP::InputFrame &frame)
     // Step3: 将3D车道线重投影回2D图像后与对应2D车道线的像素误差作为代价函数,优化当前帧的pose
     if (!LinePnP()) {
         std::cerr << "line pnp failed" << endl;
-        return frame.gtTwc;
+//        return frame.gtTwc;
     }
 
     // Step4: 后处理,根据优化后的旋转向量恢复当前帧的pose
     PostPrecess();
 
     // Step5: 重定位优化后的相机pose,也把3D车道线投回到2D平面看看结果对不对
+    std::vector<std::vector<Eigen::Vector3d> > vLaneEnds;
+    vLaneEnds.resize(mnLanes);
+    for (int i = 0; i < mnLanes; ++i)
+    {
+        std::vector<Eigen::Vector3d> pts;
+        pts.resize(2);
+        pts[0] = mvLaneEnds[i].first;
+        pts[1] = mvLaneEnds[i].second;
+        vLaneEnds[i] = pts;
+    }
     mCurrentFrame.ReprojectLanes(mvvLanePts);
+//    mCurrentFrame.ReprojectLanes(vLaneEnds);
     mCurrentGtFrame.ReprojectLanes(mvvLanePts);
 
     Eigen::Vector4d Oc4 = mCurrentFrame.mTwc.col(3);
@@ -174,7 +194,7 @@ bool Track::ComputeROIlaneSeg()
         for (int j = startID + 1; j < vLanePts.size(); ++j)
         {
             p = vLanePts[j];
-            if ((p - p1).norm() > 10)
+            if ((p - p1).norm() > 3)
             {
                 p2 = p;
                 break;
@@ -202,11 +222,12 @@ void Track::PreProcess(const LINE_PNP::InputFrame &frame)
 //    Eigen::AngleAxisd noiseAngleAxis(0.0001*noiseRv.norm(), noiseRv.normalized());
 //    Eigen::Matrix3d noiseR(noiseAngleAxis);
 //    Tcw.topLeftCorner(3, 3) *= noiseR;
-    Twc.topRightCorner(1, 1) += 10*Eigen::Matrix<double, 1, 1>::Random();  // x方向上加入幅值为2的噪声
-    Twc.block(1, 3, 1, 1) += 1*Eigen::Matrix<double, 1, 1>::Random();
-    Twc.block(2, 3, 1, 1) += 2*Eigen::Matrix<double, 1, 1>::Random();
+    Eigen::Matrix4d Tcw = Twc.inverse();
+    Tcw.topRightCorner(1, 1) += 2*Eigen::Matrix<double, 1, 1>::Random();  // x方向上加入幅值为2的噪声
+    Tcw.block(1, 3, 1, 1) += 0.5*Eigen::Matrix<double, 1, 1>::Random();
+    Tcw.block(2, 3, 1, 1) += 0*Eigen::Matrix<double, 1, 1>::Random();
 //    Twc.topRightCorner(1, 1) += 11*Eigen::Matrix<double, 1, 1>::Identity();  // xy方向上加入幅值为2的噪声
-    mCurrentFrame = Frame(frame.imL, Twc.inverse(), frame.vvLanePixels, mK);
+    mCurrentFrame = Frame(frame.imL, Tcw, frame.vvLanePixels, mK);
     mCurrentFrame.mvLaneEnds = frame.lanesEndPoint;  // 这里其实是没有聚类好的结果的,需要自己在Frame类里完成
     mCurrentFrame.mvNumPixels = frame.numPixels;
 
@@ -227,38 +248,45 @@ bool Track::LinePnP()
         return false;
     }
 
-    // step0: 统计各条车道线上的像素数,像素数越多,这条车道线的重投影误差在优化中所占的权重越大
-    int numPixelsAll = 0;
-    for (int i = 0; i < mnLanes; ++i) {
-        numPixelsAll += mCurrentFrame.mvNumPixels[i];
-    }
-
-    std::vector<double> vWeights;
-    vWeights.resize(mnLanes);
-    for (int i = 0; i < mnLanes; ++i) {
-        vWeights[i] = double(mCurrentFrame.mvNumPixels[i]) / numPixelsAll;
-    }
-
+//    std::ofstream fout("ends.txt");
     ceres::Problem problem;
     double* pTcw = mCurrentFrame.mpTcw;
+//    for (int k = 0; k < 6; ++k)
+//    {
+//        cout << pTcw[k] << endl;
+//    }
+//    cout << endl;
+
     for (int i = 0; i < mnLanes; ++i) {
+//        for (int i = 0; i < 2; ++i) {
         if (mvLaneEnds[i].first.isZero() || mvLaneEnds[i].second.isZero()) {
             continue;
         }
 //        for (int i = 0; i < 3; ++i) {
         ceres::CostFunction* pCostFunction = new ceres::AutoDiffCostFunction
-                <ReprojectError, 2, 6>(new ReprojectError(mCurrentFrame.mvLaneEnds[i], mvLaneEnds[i], mK, vWeights[i]));
+                <ReprojectError, 2, 6>(new ReprojectError(mCurrentFrame.mvLaneEnds[i], mvLaneEnds[i], mK));
         problem.AddResidualBlock(pCostFunction, nullptr, pTcw);
-        for (int j = 0; j < 3; ++j) {
-            problem.SetParameterLowerBound(pTcw, j, *(pTcw + j) - 0.01);
-            problem.SetParameterUpperBound(pTcw, j, *(pTcw + j) + 0.01);
-        }
+
+//        fout << "2D lane is\n" << mCurrentFrame.mvLaneEnds[i].first.transpose() << " " << mCurrentFrame.mvLaneEnds[i].second.transpose() << endl;
+//        fout << "3D lane end is\n" << mvLaneEnds[i].first.transpose() << " " << mvLaneEnds[i].second.transpose() << endl;
     }
+//    fout.close();
 
     if (problem.NumResidualBlocks() < 2)
     {
         std::cerr << "camera must observe at least 2 lanes" << std::endl;
         return false;
+    }
+
+    for (int j = 0; j < 3; ++j) {
+        if (j == 1)
+        {
+            problem.SetParameterLowerBound(pTcw, j, *(pTcw + j) - 0.010);
+            problem.SetParameterUpperBound(pTcw, j, *(pTcw + j) + 0.010);
+        } else {
+            problem.SetParameterLowerBound(pTcw, j, *(pTcw + j) - 0.005);
+            problem.SetParameterUpperBound(pTcw, j, *(pTcw + j) + 0.005);
+        }
     }
 
     for (int j = 3; j < 6; ++j) {
@@ -271,11 +299,11 @@ bool Track::LinePnP()
 //            problem.SetParameterLowerBound(pTcw, j, *(pTcw+j)-0.9);
 //            problem.SetParameterUpperBound(pTcw, j, *(pTcw+j)+0.9);
 //        }
-//        problem.SetParameterLowerBound(pTcw, j, *(pTcw+j)-1);
-//        problem.SetParameterUpperBound(pTcw, j, *(pTcw+j)+1);
+        problem.SetParameterLowerBound(pTcw, j, *(pTcw+j)-2);
+        problem.SetParameterUpperBound(pTcw, j, *(pTcw+j)+2);
         if (j == 5) {
-            problem.SetParameterLowerBound(pTcw, j, *(pTcw+j)-0.05);
-            problem.SetParameterUpperBound(pTcw, j, *(pTcw+j)+0.05);
+            problem.SetParameterLowerBound(pTcw, j, *(pTcw+j)-0.01);
+            problem.SetParameterUpperBound(pTcw, j, *(pTcw+j)+0.01);
         }
     }
 
@@ -285,6 +313,13 @@ bool Track::LinePnP()
 //        cout << "t lower is " << problem.GetParameterLowerBound(pTcw, j) << endl;
 //    }
 
+//    cout << "before optimize, ";
+//    for (int j = 0; j < 6; ++j)
+//    {
+//        cout << std::fixed << std::setprecision(5) << *(pTcw + j) << " ";
+//    }
+//    cout << endl;
+
     ceres::Solver::Options options;
     options.linear_solver_type = ceres::DENSE_SCHUR;
 //    options.minimizer_progress_to_stdout = true;
@@ -293,6 +328,12 @@ bool Track::LinePnP()
     ceres::Solver::Summary summary;
     ceres::Solve(options, &problem, &summary);
 //    std::cout << summary.FullReport() << "\n";
+//    cout << "after  optimize, ";
+//    for (int j = 0; j < 6; ++j)
+//    {
+//        cout << std::fixed << std::setprecision(5) << *(pTcw + j) << " ";
+//    }
+//    cout << endl;
 
     if (summary.termination_type == ceres::CONVERGENCE) {
         return true;
@@ -498,7 +539,6 @@ void Track::VisualLanesAndReLanes() const
         return;
     }
 
-    /*
     std::vector<std::vector<Eigen::Vector2d> > vvLanePts = mCurrentFrame.mvvLanePixels;
     uchar* ptr = image.data;
     int step0 = image.step[0];
@@ -514,21 +554,21 @@ void Track::VisualLanesAndReLanes() const
     vRGBs.push_back(Eigen::Vector3i(255, 255, 0));
     vRGBs.push_back(Eigen::Vector3i(255, 0, 255));
 
-        for (int i = 0; i < vvLanePts.size(); ++i)
-        {
-            std::vector<Eigen::Vector2d> pts = vvLanePts[i];
-            Eigen::Vector3i rgb = vRGBs[i];
+    for (int i = 0; i < vvLanePts.size(); ++i)
+    {
+        std::vector<Eigen::Vector2d> pts = vvLanePts[i];
+        Eigen::Vector3i rgb = vRGBs[i];
 
-            for (auto pt : pts) {
-                int u = pt[0];
-                int v = pt[1];
-                *(ptr + v*step0 + u*step1 + 0*elemSize1) = rgb[0];
-                *(ptr + v*step0 + u*step1 + 1*elemSize1) = rgb[1];
-                *(ptr + v*step0 + u*step1 + 2*elemSize1) = rgb[2];
-            }
-
+        for (auto pt : pts) {
+            int u = pt[0];
+            int v = pt[1];
+            *(ptr + v*step0 + u*step1 + 0*elemSize1) = rgb[0];
+            *(ptr + v*step0 + u*step1 + 1*elemSize1) = rgb[1];
+            *(ptr + v*step0 + u*step1 + 2*elemSize1) = rgb[2];
         }
-        */
+
+    }
+
 
     std::vector<std::pair<Eigen::Vector2d, Eigen::Vector2d> > vEndPointPairs = mCurrentFrame.mvLaneEnds;
     int nLanes = vEndPointPairs.size();
@@ -551,14 +591,15 @@ void Track::VisualLanesAndReLanes() const
     cvPutText(&imMsg, msgLeft, cvPoint(80,70), &font, cvScalar(0, 0, 255));
     cvPutText(&imMsg, leftDist, cvPoint(350,70), &font, cvScalar(0, 0, 255));
     const char* msgRight = "Right dist: ";
-    const char* rightDist = std::to_string(mCurrentFrame.mDistRight - 0.975).c_str();
+//    const char* rightDist = std::to_string(mCurrentFrame.mDistRight - 0.975).c_str();
+    const char* rightDist = std::to_string(mCurrentFrame.mnId).c_str();
     cvPutText(&imMsg, msgRight, cvPoint(80,170), &font, cvScalar(0, 0, 255));
     cvPutText(&imMsg, rightDist, cvPoint(350,170), &font, cvScalar(0, 0, 255));
 
 //    cv::imshow("current image", image);
 //    cv::waitKey(1);
 
-    cv::Mat im = mCurrentFrame.mImage.clone();
+//    cv::Mat im = mCurrentFrame.mImage.clone();
     std::vector<std::vector<Eigen::Vector2d> > vvReprojectedLanePts = mCurrentFrame.mvvReprojectedLanePts;
     for (const std::vector<Eigen::Vector2d> & vReprojectedLanePts : vvReprojectedLanePts)
     {
@@ -574,15 +615,27 @@ void Track::VisualLanesAndReLanes() const
                 continue;
             }
 
-            cv::circle(im, cv::Point(pt[0], pt[1]), 2, cv::Scalar(0, 255, 255), 2);
+            cv::circle(image, cv::Point(pt[0], pt[1]), 2, cv::Scalar(0, 255, 255), 2);
         }
-
     }
 
-    cv::imshow("optimized ReProjected image", im);
+    cv::imshow("optimized ReProjected image", image);
     cv::waitKey(1);
 
+    /*
     cv::Mat im2 = mCurrentFrame.mImage.clone();
+
+    for (int i = 0; i < nLanes; ++i) {
+        // cv::Point的格式是(u,v),即先(col,row)
+        cv::Point p1(vEndPointPairs[i].first[0], vEndPointPairs[i].first[1]);
+        cv::Point p2(vEndPointPairs[i].second[0], vEndPointPairs[i].second[1]);
+        if (i ==0 || i == 1) {
+            cv::line(im2, p1, p2, cv::Scalar(0, 0, 255), 3);
+        } else {
+            cv::line(im2, p1, p2, cv::Scalar(255, 0, 255), 3);
+        }
+    }
+
     std::vector<std::vector<Eigen::Vector2d> > vvReprojectedLanePts2 = mCurrentGtFrame.mvvReprojectedLanePts;
     for (const std::vector<Eigen::Vector2d> & vReprojectedLanePts : vvReprojectedLanePts2)
     {
@@ -604,6 +657,8 @@ void Track::VisualLanesAndReLanes() const
 
     cv::imshow("Gt ReProjected image", im2);
     cv::waitKey(1);
+     */
+
 }
 
 void Track::ComputeDist2Lanes()
@@ -664,6 +719,51 @@ void Track::ComputeDist2Lanes()
             break;
         }
     }
+}
+
+std::vector<double> Track::ComputeLaneDists() const
+{
+    std::vector<double> vDists;
+    vDists.resize(mnLanes - 1);
+
+    for (int i = 0; i < mnLanes - 1; ++i)
+    {
+        std::vector<Eigen::Vector3d> pts0 = mvvLanePts[i];
+        int numPts = pts0.size();
+        std::vector<double> vDist;
+        vDist.resize(numPts);
+
+        std::vector<Eigen::Vector3d> pts1 = mvvLanePts[i+1];
+        for (int j = 0; j < numPts; ++j)
+        {
+            Eigen::Vector3d pt0 = pts0[j];
+//            double minDist = UINT_MAX;
+//            int minID = 0;
+//
+//            for (int k = 0; k < pts1.size(); ++k)
+//            {
+//                double dist = (pts1[k] - pt0).norm();
+//                if (dist < minDist)
+//                {
+//                    minDist = dist;
+//                    minID = k;
+//                }
+//            }
+
+            Eigen::Vector3d p1 = pts1.front();
+            Eigen::Vector3d p2 = pts1.back();
+
+            Eigen::Vector3d p12 = (p2 - p1).normalized();
+            Eigen::Vector3d p10 = pt0 - p1;
+
+            vDist[j] = p10.cross(p12).norm();
+        }
+
+        double varDist = std::accumulate(vDist.begin(), vDist.end(), 0.0) / numPts;
+        vDists[i] = varDist;
+    }
+
+    return vDists;
 }
 
 }

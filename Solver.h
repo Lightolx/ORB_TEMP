@@ -27,16 +27,17 @@ struct costFunctor {
 struct ReprojectError {
     explicit ReprojectError(const std::pair<Eigen::Vector2d, Eigen::Vector2d> &_keyline,
                             const std::pair<Eigen::Vector3d, Eigen::Vector3d> &_mapline,
-                            const Eigen::Matrix3d &_K,
-                            double _weight):
-            keyline(_keyline), mapline(_mapline), K(_K), weight(_weight){}
+                            const Eigen::Matrix3d &_K):
+            keyline(_keyline), mapline(_mapline), K(_K){}
 
     template <typename T>  // 这个T是double或者Jet
     bool operator()(const T* const pKeyFrame, T* residual) const {
         // Step0: 数据转换，把所有的数组转换为Eigen::Matrix
-        Eigen::Map<const Eigen::Matrix<T, 3, 1>> rotateVector(pKeyFrame);
-        Eigen::AngleAxis<T> angleAxis(rotateVector.norm(), rotateVector.normalized());
-        Eigen::Matrix<T, 3, 3> R(angleAxis);
+        Eigen::Map<const Eigen::Matrix<T, 3, 1>> rpy(pKeyFrame);
+        Eigen::AngleAxis<T> angleAxisZ(rpy[0], Eigen::Matrix<T, 3, 1>::UnitZ());
+        Eigen::AngleAxis<T> angleAxisY(rpy[1], Eigen::Matrix<T, 3, 1>::UnitY());
+        Eigen::AngleAxis<T> angleAxisX(rpy[2], Eigen::Matrix<T, 3, 1>::UnitX());
+        Eigen::Matrix<T, 3, 3> R(angleAxisZ * angleAxisY * angleAxisX);
         Eigen::Map<const Eigen::Matrix<T, 3, 1>> t(pKeyFrame+3);
 
         for (int i = 0; i < 2; ++i) {
@@ -66,8 +67,8 @@ struct ReprojectError {
             const Eigen::Matrix<T, 3, 1> p1P = uv - p1;
             const Eigen::Matrix<T, 3, 1> p1p2 = (p2 - p1).normalized();
 
-            residual[i] = T(weight) * (p1P.cross(p1p2)).norm();
-//            residual[i] = (p1P.cross(p1p2)).norm();
+//            residual[i] = T(weight) * (p1P.cross(p1p2)).norm();
+            residual[i] = (p1P.cross(p1p2)).norm();
         }
 
         return true;
@@ -76,7 +77,6 @@ struct ReprojectError {
     const std::pair<Eigen::Vector2d, Eigen::Vector2d> keyline;
     const std::pair<Eigen::Vector3d, Eigen::Vector3d> mapline;
     const Eigen::Matrix3d K;
-    const double weight;
 };
 }
 

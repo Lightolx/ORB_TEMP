@@ -39,6 +39,8 @@ public:
 
     void ConstructLocalMap();
 
+    std::vector<double> ComputeLaneDists() const;
+
     // 把3D车道线重投影回2D平面，提取出能在2D图像上看到的且距离光心最近的5m车道线
     bool ComputeROIlaneSeg();
 

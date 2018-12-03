@@ -31,13 +31,12 @@ void Frame::UpdateTwc()
     mTwc = mTcw.inverse();
     mOc = mTwc.topRightCorner(3, 1);
 
-    // 12维的pose转换成6维向量,其实就是旋转矩阵转化为旋转向量
-    Sophus::SO3 SO3_R(mR);
-    Eigen::Vector3d rotationVector = SO3_R.log();
+    // 12维的pose转换成6维向量,其实就是旋转矩阵转化为欧拉角
+    Eigen::Vector3d rpy = mR.eulerAngles(2, 1, 0);
     mpTcw = new double[6];
 
     for (int i = 0; i < 3; ++i) {
-        mpTcw[i] = rotationVector[i];
+        mpTcw[i] = rpy[i];
     }
 
     for (int i = 0; i < 3; ++i) {
@@ -47,9 +46,10 @@ void Frame::UpdateTwc()
 
 void Frame::UpdataTcw()
 {
-    Eigen::Vector3d rv = Eigen::Map<const Eigen::Vector3d>(mpTcw);
-    Eigen::AngleAxisd angleAxisd(rv.norm(), rv.normalized());
-    mR = Eigen::Matrix3d(angleAxisd);
+    Eigen::Vector3d rpy = Eigen::Map<const Eigen::Vector3d>(mpTcw);
+    mR = Eigen::Matrix3d(Eigen::AngleAxisd(rpy[0], Eigen::Vector3d::UnitZ()) *
+                         Eigen::AngleAxisd(rpy[1], Eigen::Vector3d::UnitY()) *
+                         Eigen::AngleAxisd(rpy[2], Eigen::Vector3d::UnitX()));
     mt = Eigen::Map<const Eigen::Vector3d>(mpTcw + 3);
     mTcw.topLeftCorner(3, 3) = mR;
     mTcw.topRightCorner(3, 1) = mt;

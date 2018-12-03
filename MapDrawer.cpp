@@ -160,22 +160,22 @@ void MapDrawer::DrawHDMap() {
             laneSection::right_type rightLanes = laneSection.right();
 
             // Step1: 可行驶区域左右边界
-//            roadBoundary::geometry_type geometry = leftBoundary.geometry();
-//            DrawHDPoints(geometry, 1.0, 0.0, 0.0);
-//            geometry = rightBoundary.geometry();
-//            DrawHDPoints(geometry, 1.0, 0.0, 0.0);
+            roadBoundary::geometry_type geometry = leftBoundary.geometry();
+            DrawHDPoints(geometry, 1.0, 0.0, 0.0);
+            geometry = rightBoundary.geometry();
+            DrawHDPoints(geometry, 1.0, 0.0, 0.0);
 
             // Step2: 车道线
             // 车道的中心线
             lane::border_type border = centerLane.lane().border();
-            auto geometry = border.geometry();
+            geometry = border.geometry();
             Eigen::Vector3d colors = (Eigen::Vector3d::Random() + Eigen::Vector3d::Ones()) / 2;
 
             double r = vRGBs[i][0];
             double g = vRGBs[i][1];
             double b = vRGBs[i][2];
 //            DrawHDPoints(geometry, r, g, b);
-//            DrawHDPoints(geometry, 1.0, 0.0, 0.0);
+            DrawHDPoints(geometry, 0.0, 1.0, 0.0);
 
             std::vector<halfRoad::lane_type> allLane;
             //左边车道的车道线
@@ -194,7 +194,7 @@ void MapDrawer::DrawHDMap() {
                 lane::leftBorder_optional leftBorder = lane.leftBorder();
                 if (leftBorder.present()) {
                     geometry = leftBorder.get().geometry();
-                    DrawHDPoints(geometry, r, g, b);
+                    DrawHDPoints(geometry, 1.0, 1.0, 1.0);
                 }
             }
         }
@@ -217,7 +217,7 @@ void MapDrawer::DrawHDMap() {
 //        DrawHDPoints(geometry, 1.0, 1.0, 0.0);
 //    }
       // Step5: 当前相机可能看到的所有车道
-        DrawRoiLanes(0.0, 1.0, 0.0);
+//        DrawRoiLanes(0.0, 1.0, 0.0);
 
 }
 

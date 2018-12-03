@@ -134,11 +134,15 @@ int main(int argc, char *argv[])
     std::vector<std::vector<std::pair<Eigen::Vector2d, Eigen::Vector2d> > > vvEndPointPairs;
     std::vector<std::vector<std::vector<Eigen::Vector2d> > > vvvLanePixels;
     std::vector<std::vector<int> > vvNumPixels;
-    int startIndex = 5100;
-    int endIndex = 5300;
+//    int startIndex = 5115;
+//    int endIndex = 5300;
+//    int startIndex = 4040;
+//    int endIndex = 4240;
+    int startIndex = 1780;
+    int endIndex = 2080;
 //    LoadSTCCImageLanes("/home/lightol/backup/cluster_post/",
 //                       vvEndPointPairs, nImages, startIndex, endIndex);  // 4040, 4240
-    LoadSTCCImageLanes("endPoints4.txt", vvEndPointPairs);
+    LoadSTCCImageLanes("endPoints7.txt", vvEndPointPairs);
     LoadSTCCLanePixels("/home/lightol/backup/cluster_post/", vvvLanePixels, vvNumPixels, nImages, startIndex, endIndex);
 
     System SLAM = System(path_to_data + "/HDmap3D_HZ_GPS.xml");
@@ -149,6 +153,7 @@ int main(int argc, char *argv[])
 //        cout << ni << endl;
         InputFrame frame;
         leftCap >> frame.imL;
+
         if (frame.imL.empty())
         {
             cerr << endl << "Failed to load image" << endl;
@@ -159,7 +164,7 @@ int main(int argc, char *argv[])
             continue;
         } else if (ni > endIndex)
         {
-//            getchar();
+            getchar();
             break;
         }
 
@@ -168,18 +173,19 @@ int main(int argc, char *argv[])
         frame.vvLanePixels = vvvLanePixels[ni];
         frame.numPixels = vvNumPixels[ni];
 
+        cv::imwrite("image0.png", frame.imL);
         Eigen::Matrix4d Twc = SLAM.Track(frame);
 //        VisualLanes(frame, ni);
 //        usleep(100000);
     }
 
-    auto vErrors = SLAM.mpTracker->mvErrors;
-    std::ofstream fout("errors.txt");
-    for (double error : vErrors)
-    {
-        fout << std::fixed << std::setprecision(5) << error << endl;
-    }
-    fout.close();
+//    auto vErrors = SLAM.mpTracker->mvErrors;
+//    std::ofstream fout("errors.txt");
+//    for (double error : vErrors)
+//    {
+//        fout << std::fixed << std::setprecision(5) << error << endl;
+//    }
+//    fout.close();
 
 }
 
@@ -244,7 +250,7 @@ void LoadSTCCImageLanes(const std::string &filepath,
         }
 
         // Step1.5: 如果车道线数量超过4条,那么就删除包含像素数量最少的那条车道线
-        if (lanes.size() > 4)
+        while (lanes.size() > 4)
         {
             int minNumPixel = UINT_MAX;
             int minLaneID = 0;
@@ -301,8 +307,8 @@ void LoadSTCCImageLanes(const std::string &filepath,
             // 求出车道线的上下两个端点
             double u1 = (minv - b) / a;    // 车道线上端点对应的u
             double u2 = (maxv - b) / a;    // 车道线下端点对应的u,容易出现小于0或大于1758等极端情况
-            u2 = std::max(0.0, u2);
-            u2 = std::min(1758.0, u2);
+//            u2 = std::max(0.0, u2);
+//            u2 = std::min(1758.0, u2);
             Eigen::Vector2d p1(u1, minv);
             Eigen::Vector2d p2(u2, maxv);
             std::pair<Eigen::Vector2d, Eigen::Vector2d> pairEndPoints = std::make_pair(p1, p2);
@@ -323,7 +329,7 @@ void LoadSTCCImageLanes(const std::string &filepath,
         vvEndPointPairs[ni] = vEndPointPairs;
     }
 
-    std::ofstream fout("endPoints4.txt");
+    std::ofstream fout("endPoints7.txt");
     for (int ni = 0; ni < vvEndPointPairs.size(); ++ni)
     {
         auto vEndPointPairs = vvEndPointPairs[ni];

@@ -33,7 +33,7 @@ void Viewer::Run() {
 
     pangolin::CreatePanel("menu").SetBounds(0.0, 1.0, 0.0, pangolin::Attach::Pix(175));
     pangolin::Var<bool> menuFollowCamera("menu.Follow Camera", true, true);
-    pangolin::Var<bool> menuShowTrajectory("menu.Show Trajectory", true, true);
+    pangolin::Var<bool> menuShowTrajectory("menu.Show Trajectory", false, true);
     pangolin::Var<bool> menuShowLanes("menu.Show Lanes", true, true);
 
     // Define Camera Render Object (for view / scene browsing)
@@ -90,7 +90,7 @@ void Viewer::Run() {
         // draw map
         mpMapDrawer->DrawCurrentCamera(gtTwc, Eigen::Vector3f(0, 1, 0));
 //        mpMapDrawer->DrawCurrentCamera(noisedTwc, Eigen::Vector3f(0 , 0, 1), 1.0);
-        mpMapDrawer->DrawCurrentCamera(optimizidTwc, Eigen::Vector3f(1, 0, 0));
+//        mpMapDrawer->DrawCurrentCamera(optimizidTwc, Eigen::Vector3f(1, 0, 0));
 
         if (menuShowTrajectory)
             mpMapDrawer->DrawTrajectory();
